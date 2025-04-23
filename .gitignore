@@ -1,0 +1,29 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Environment
+.env
+.venv/
+venv/
+env/
+
+# macOS system files
+.DS_Store
+
+# VS Code settings
+.vscode/
+
+# Log files
+*.log
+
+# CSV/data files (optional, if you don’t want to commit expenses)
+expenses.csv
+
+# Jupyter notebooks checkpoints (if using Jupyter)
+.ipynb_checkpoints/
+
+# OS files
+Thumbs.db
+ehthumbs.db

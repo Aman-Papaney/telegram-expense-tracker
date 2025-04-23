@@ -1,0 +1,5 @@
+python-telegram-bot==20.0
+psycopg2-binary==2.9.3
+matplotlib==3.5.1
+plotly==5.6.0
+python-dotenv==0.19.2
