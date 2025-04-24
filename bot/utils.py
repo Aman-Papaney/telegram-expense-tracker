@@ -1,16 +1,45 @@
 import csv
 import os
+import psycopg2
+from psycopg2.extras import RealDictCursor
+from dotenv import load_dotenv
+
+load_dotenv()
 
 EXPENSES_FILE = "expenses.csv"
 
 
+def get_db_connection():
+    """Establish a connection to the PostgreSQL database."""
+    return psycopg2.connect(
+        dbname=os.getenv("DB_NAME"),
+        user=os.getenv("DB_USER"),
+        password=os.getenv("DB_PASSWORD"),
+        host=os.getenv("DB_HOST"),
+        port=os.getenv("DB_PORT"),
+        cursor_factory=RealDictCursor
+    )
+
+
 def load_expenses():
-    """Load expenses from the CSV file."""
-    if os.path.exists(EXPENSES_FILE):
-        with open(EXPENSES_FILE, mode="r", newline="") as file:
+    """Load expenses from the CSV file and return them as a list of tuples."""
+    expenses = []
+    try:
+        with open(EXPENSES_FILE, "r") as file:
             reader = csv.reader(file)
-            return [(float(row[0]), row[1], row[2]) for row in reader]
-    return []
+            for row in reader:
+                try:
+                    # Ensure the row has the correct number of elements and valid data
+                    if len(row) == 3 and row[0] and row[1] and row[2]:
+                        expenses.append((float(row[0]), row[1], row[2]))
+                except ValueError:
+                    # Skip rows with invalid data
+                    continue
+    except FileNotFoundError:
+        # If the file does not exist, return an empty list
+        pass
+
+    return expenses
 
 
 def save_expense(expenses, amount, category, date):

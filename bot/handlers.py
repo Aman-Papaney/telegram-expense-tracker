@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes
-from utils import load_expenses, save_expense, start_message
+from utils import load_expenses, save_expense, start_message, get_db_connection
 
 # Predefined categories
 CATEGORIES = ["Travel", "Food", "Clothes", "Entertainment", "Health"]
@@ -11,50 +11,118 @@ expenses = load_expenses()
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(start_message())
 
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Provide a list of available commands and their descriptions."""
+    help_text = (
+        "Here are the available commands:\n\n"
+        "/start - Start the bot and get a welcome message.\n"
+        "/add <amount> <category> [description] - Add a new expense. Example: /add 50 Food Lunch\n"
+        "/summary - Get a summary of all expenses.\n"
+        "/daily - Get today's expenses.\n"
+        "/weekly - Get this week's expenses.\n"
+        "/monthly - Get this month's expenses.\n"
+        "/export - Export all expenses as a CSV file.\n"
+        "/help - Show this help message.\n"
+        "/add_category <name> - Add a new category.\n"
+        "/delete_category - Delete an existing category.\n"
+        "/show_categories - Display all existing categories."
+    )
+    await update.message.reply_text(help_text)
+
 async def add_expense(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         amount = float(context.args[0])
-        context.user_data['amount'] = amount
+        category = context.args[1]
+        description = " ".join(context.args[2:]) if len(context.args) > 2 else ""
+        user = update.effective_user
 
-        # Show category selection buttons
-        keyboard = [[InlineKeyboardButton(cat, callback_data=cat)] for cat in CATEGORIES]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text("Select a category:", reply_markup=reply_markup)
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                # Ensure user exists in the database
+                cur.execute(
+                    """
+                    INSERT INTO users (telegram_id, username)
+                    VALUES (%s, %s)
+                    ON CONFLICT (telegram_id) DO NOTHING
+                    RETURNING id;
+                    """,
+                    (user.id, user.username)
+                )
+                user_id = cur.fetchone()["id"]
+
+                # Insert expense
+                cur.execute(
+                    """
+                    INSERT INTO expenses (user_id, amount, category, description)
+                    VALUES (%s, %s, %s, %s);
+                    """,
+                    (user_id, amount, category, description)
+                )
+
+        await update.message.reply_text(f"✅ Added expense: ${amount} in {category}")
     except (IndexError, ValueError):
-        await update.message.reply_text("⚠️ Usage: /add <amount>")
+        await update.message.reply_text("⚠️ Usage: /add <amount> <category> [description]")
+    except Exception as e:
+        print(e)
+        await update.message.reply_text(f"❌ An error occurred: {e}")
 
 async def category_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    category = query.data
+    # print(update.callback_query.message.text)
+
+    category = query.data.replace("add_", '')
     amount = context.user_data.get('amount')
     date = datetime.now().strftime("%Y-%m-%d")
 
     # Save expense
     save_expense(expenses, amount, category, date)
 
-    await query.edit_message_text(f"✅ Added: ${amount} for {category} on {date}")
+    await query.edit_message_text(f"✅ You spent ${amount} for {category} on {date}")
 
 async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Calculate total expenses
-    total = sum(e[0] for e in expenses)
+    user = update.effective_user
 
-    # Calculate expenses by category
-    category_totals = {}
-    for amount, category, _ in expenses:
-        if category in category_totals:
-            category_totals[category] += amount
-        else:
-            category_totals[category] = amount
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                # Fetch user ID
+                cur.execute("SELECT id FROM users WHERE telegram_id = %s;", (user.id,))
+                user_id = cur.fetchone()["id"]
 
-    # Prepare the summary message
-    message = "💰 Expense Summary:\n\n"
-    for category, total_amount in category_totals.items():
-        message += f"{category}: ${total_amount:.2f}\n"
-    message += f"\nTotal: ${total:.2f}"
+                # Fetch expenses summary
+                cur.execute(
+                    """
+                    SELECT category, SUM(amount) as total
+                    FROM expenses
+                    WHERE user_id = %s
+                    GROUP BY category;
+                    """,
+                    (user_id,)
+                )
+                category_totals = cur.fetchall()
 
-    await update.message.reply_text(message)
+                # Fetch total expenses
+                cur.execute(
+                    """
+                    SELECT SUM(amount) as total
+                    FROM expenses
+                    WHERE user_id = %s;
+                    """,
+                    (user_id,)
+                )
+                total = cur.fetchone()["total"]
+
+        # Prepare the summary message
+        message = "💰 Expense Summary:\n\n"
+        for row in category_totals:
+            message += f"{row['category']}: ${row['total']:.2f}\n"
+        message += f"\nTotal: ${total:.2f}"
+
+        await update.message.reply_text(message)
+    except Exception as e:
+        await update.message.reply_text(f"❌ An error occurred: {e}")
 
 async def export_expenses(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -68,42 +136,138 @@ async def export_expenses(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ An error occurred: {e}")
 
 async def daily_summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
     today = datetime.now().date()
-    daily_expenses = [e[0] for e in expenses if datetime.strptime(e[2], "%Y-%m-%d").date() == today]
-    total = sum(daily_expenses)
-    await update.message.reply_text(f"📅 Today's expenses: ${total}")
+
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                # Fetch user ID
+                cur.execute("SELECT id FROM users WHERE telegram_id = %s;", (user.id,))
+                user_id = cur.fetchone()["id"]
+
+                # Fetch daily expenses
+                cur.execute(
+                    """
+                    SELECT category, SUM(amount) as total
+                    FROM expenses
+                    WHERE user_id = %s AND date::date = %s
+                    GROUP BY category;
+                    """,
+                    (user_id, today)
+                )
+                category_totals = cur.fetchall()
+
+                # Fetch total daily expenses
+                cur.execute(
+                    """
+                    SELECT SUM(amount) as total
+                    FROM expenses
+                    WHERE user_id = %s AND date::date = %s;
+                    """,
+                    (user_id, today)
+                )
+                total = cur.fetchone()["total"]
+
+        # Prepare the daily summary message
+        message = "📅 Today's Expenses:\n\n"
+        for row in category_totals:
+            message += f"{row['category']}: ${row['total']:.2f}\n"
+        message += f"\nTotal: ${total:.2f}"
+
+        await update.message.reply_text(message)
+    except Exception as e:
+        await update.message.reply_text(f"❌ An error occurred: {e}")
 
 async def weekly_summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
     today = datetime.now().date()
     week_start = today - timedelta(days=today.weekday())
-    weekly_expenses = [e[0] for e in expenses if week_start <= datetime.strptime(e[2], "%Y-%m-%d").date() <= today]
-    total = sum(weekly_expenses)
-    await update.message.reply_text(f"📅 This week's expenses: ${total}")
+
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                # Fetch user ID
+                cur.execute("SELECT id FROM users WHERE telegram_id = %s;", (user.id,))
+                user_id = cur.fetchone()["id"]
+
+                # Fetch weekly expenses
+                cur.execute(
+                    """
+                    SELECT category, SUM(amount) as total
+                    FROM expenses
+                    WHERE user_id = %s AND date::date BETWEEN %s AND %s
+                    GROUP BY category;
+                    """,
+                    (user_id, week_start, today)
+                )
+                category_totals = cur.fetchall()
+
+                # Fetch total weekly expenses
+                cur.execute(
+                    """
+                    SELECT SUM(amount) as total
+                    FROM expenses
+                    WHERE user_id = %s AND date::date BETWEEN %s AND %s;
+                    """,
+                    (user_id, week_start, today)
+                )
+                total = cur.fetchone()["total"]
+
+        # Prepare the weekly summary message
+        message = "📅 This Week's Expenses:\n\n"
+        for row in category_totals:
+            message += f"{row['category']}: ${row['total']:.2f}\n"
+        message += f"\nTotal: ${total:.2f}"
+
+        await update.message.reply_text(message)
+    except Exception as e:
+        await update.message.reply_text(f"❌ An error occurred: {e}")
 
 async def monthly_summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
     today = datetime.now().date()
     month_start = today.replace(day=1)
-    monthly_expenses = [e[0] for e in expenses if month_start <= datetime.strptime(e[2], "%Y-%m-%d").date() <= today]
-    total = sum(monthly_expenses)
-    await update.message.reply_text(f"📅 This month's expenses: ${total}")
 
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Provide a list of available commands and their descriptions."""
-    help_text = (
-        "Here are the available commands:\n\n"
-        "/start - Start the bot and get a welcome message.\n"
-        "/add <amount> - Add a new expense. Example: /add 50\n"
-        "/summary - Get a summary of all expenses.\n"
-        "/daily - Get today's expenses.\n"
-        "/weekly - Get this week's expenses.\n"
-        "/monthly - Get this month's expenses.\n"
-        "/export - Export all expenses as a CSV file.\n"
-        "/help - Show this help message.\n"
-        "/add_category <name> - Add a new category.\n"
-        "/delete_category <name> - Delete an existing category.\n"
-        "/show_categories - Display all existing categories."
-    )
-    await update.message.reply_text(help_text)
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                # Fetch user ID
+                cur.execute("SELECT id FROM users WHERE telegram_id = %s;", (user.id,))
+                user_id = cur.fetchone()["id"]
+
+                # Fetch monthly expenses
+                cur.execute(
+                    """
+                    SELECT category, SUM(amount) as total
+                    FROM expenses
+                    WHERE user_id = %s AND date::date BETWEEN %s AND %s
+                    GROUP BY category;
+                    """,
+                    (user_id, month_start, today)
+                )
+                category_totals = cur.fetchall()
+
+                # Fetch total monthly expenses
+                cur.execute(
+                    """
+                    SELECT SUM(amount) as total
+                    FROM expenses
+                    WHERE user_id = %s AND date::date BETWEEN %s AND %s;
+                    """,
+                    (user_id, month_start, today)
+                )
+                total = cur.fetchone()["total"]
+
+        # Prepare the monthly summary message
+        message = "📅 This Month's Expenses:\n\n"
+        for row in category_totals:
+            message += f"{row['category']}: ${row['total']:.2f}\n"
+        message += f"\nTotal: ${total:.2f}"
+
+        await update.message.reply_text(message)
+    except Exception as e:
+        await update.message.reply_text(f"❌ An error occurred: {e}")
 
 async def add_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -119,17 +283,28 @@ async def add_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ Error: {e}")
 
 async def delete_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        category_to_delete = " ".join(context.args).strip()
-        if not category_to_delete:
-            raise ValueError("Category name cannot be empty.")
-        if category_to_delete not in CATEGORIES:
-            await update.message.reply_text(f"⚠️ The category '{category_to_delete}' does not exist.")
-        else:
-            CATEGORIES.remove(category_to_delete)
-            await update.message.reply_text(f"✅ Category '{category_to_delete}' deleted successfully.")
-    except Exception as e:
-        await update.message.reply_text(f"❌ Error: {e}")
+    """Provide a list of categories for the user to choose from for deletion."""
+    if not CATEGORIES:
+        await update.message.reply_text("⚠️ No categories available to delete.")
+        return
+
+    # Show category selection buttons
+    keyboard = [[InlineKeyboardButton(cat, callback_data=f"delete_{cat}")] for cat in CATEGORIES]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text("Select a category to delete:", reply_markup=reply_markup)
+
+
+async def handle_delete_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle the deletion of a selected category."""
+    query = update.callback_query
+    await query.answer()    
+
+    category_to_delete = query.data.replace("delete_", "")
+    if category_to_delete in CATEGORIES:
+        CATEGORIES.remove(category_to_delete)
+        await query.edit_message_text(f"✅ Category '{category_to_delete}' deleted successfully.")
+    else:
+        await query.edit_message_text(f"❌ Category '{category_to_delete}' does not exist.")
 
 async def show_categories(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show all existing categories."""
