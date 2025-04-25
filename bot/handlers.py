@@ -2,6 +2,8 @@ from datetime import datetime, timedelta
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes
 from utils import load_expenses, save_expense, start_message, get_db_connection
+import csv
+import os
 
 # Predefined categories
 CATEGORIES = ["Travel", "Food", "Clothes", "Entertainment", "Health"]
@@ -46,9 +48,16 @@ async def add_expense(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     ON CONFLICT (telegram_id) DO NOTHING
                     RETURNING id;
                     """,
-                    (user.id, user.username)
+                    (user.id, user.first_name)
                 )
-                user_id = cur.fetchone()["id"]
+                result = cur.fetchone()
+
+                if result is None:
+                    # User already exists, fetch their ID
+                    cur.execute("SELECT id FROM users WHERE telegram_id = %s;", (user.id,))
+                    user_id = cur.fetchone()["id"]
+                else:
+                    user_id = result["id"]
 
                 # Insert expense
                 cur.execute(
@@ -63,7 +72,6 @@ async def add_expense(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except (IndexError, ValueError):
         await update.message.reply_text("⚠️ Usage: /add <amount> <category> [description]")
     except Exception as e:
-        print(e)
         await update.message.reply_text(f"❌ An error occurred: {e}")
 
 async def category_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -125,13 +133,44 @@ async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ An error occurred: {e}")
 
 async def export_expenses(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+
     try:
-        # Send the expenses.csv file to the user
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                # Fetch user ID
+                cur.execute("SELECT id FROM users WHERE telegram_id = %s;", (user.id,))
+                user_id = cur.fetchone()["id"]
+
+                # Fetch user-specific expenses
+                cur.execute(
+                    """
+                    SELECT amount, category, description, date
+                    FROM expenses
+                    WHERE user_id = %s
+                    ORDER BY date;
+                    """,
+                    (user_id,)
+                )
+                expenses = cur.fetchall()
+
+        # Write expenses to a temporary CSV file
+        temp_file = f"{user.id}_expenses.csv"
+        with open(temp_file, mode="w", newline="") as file:
+            writer = csv.writer(file)
+            writer.writerow(["Amount", "Category", "Description", "Date"])
+            for expense in expenses:
+                writer.writerow([expense["amount"], expense["category"], expense["description"], expense["date"]])
+
+        # Send the CSV file to the user
         await update.message.reply_document(
-            document=open("expenses.csv", "rb"),
+            document=open(temp_file, "rb"),
             filename="expenses.csv",
             caption="Here is your expenses file."
         )
+
+        # Clean up the temporary file
+        os.remove(temp_file)
     except Exception as e:
         await update.message.reply_text(f"❌ An error occurred: {e}")
 
