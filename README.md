@@ -25,9 +25,8 @@ This project is a **Telegram Bot** that allows users to **track their expenses**
 3. 📁 Export expenses as CSV
 4. 🧾 Categorize expenses
 5. 🛠️ Database integration *(in progress)*
-6. 📉 Generate charts *(coming soon)*
-7. 👤 Per-user tracking (multi-user support) *(coming soon)*
-8. ⏰ Filter expenses by date *(coming soon)*
+6. 👤 Per-user tracking *(in progress)*
+7. 📉 Generate charts *(coming soon)*
 
 ---
 
