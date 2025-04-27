@@ -4,6 +4,8 @@ from telegram.ext import ContextTypes
 from utils import load_expenses, save_expense, start_message, get_db_connection
 import csv
 import os
+import matplotlib.pyplot as plt
+from io import BytesIO
 
 expenses = load_expenses()
 
@@ -22,9 +24,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/monthly - Get this month's expenses.\n"
         "/export - Export all expenses as a CSV file.\n"
         "/help - Show this help message.\n"
-        # "/add_category <name> - Add a new category.\n"
-        # "/delete_category - Delete an existing category.\n"
-        # "/show_categories - Display all existing categories."
+        "/chart - Show expenses in pie chart.\n"
     )
     await update.message.reply_text(help_text)
 
@@ -324,51 +324,58 @@ async def monthly_summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"❌ An error occurred: {e}")
 
-# async def add_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
-#     try:
-#         new_category = " ".join(context.args).strip()
-#         if not new_category:
-#             raise ValueError("Category name cannot be empty.")
-#         if new_category in CATEGORIES:
-#             await update.message.reply_text(f"⚠️ The category '{new_category}' already exists.")
-#         else:
-#             CATEGORIES.append(new_category)
-#             await update.message.reply_text(f"✅ Category '{new_category}' added successfully.")
-#     except Exception as e:
-#         await update.message.reply_text(f"❌ Error: {e}")
+async def generate_expense_pie_chart(user_id: int):
+    """Generates a pie chart of expenses grouped by category for a given user."""
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            # Query expenses grouped by category
+            cur.execute(
+                """
+                SELECT category, SUM(amount) as total
+                FROM expenses
+                WHERE user_id = %s
+                GROUP BY category;
+                """,
+                (user_id,)
+            )
+            results = cur.fetchall()
 
-# async def delete_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
-#     """Provide a list of categories for the user to choose from for deletion."""
-#     predefined_categories = ["Travel", "Food", "Clothes", "Entertainment", "Health"]
+    if not results:
+        return None
 
-#     if not predefined_categories:
-#         await update.message.reply_text("⚠️ No categories available to delete.")
-#         return
+    # Extract data for the pie chart
+    categories = [row['category'] for row in results]
+    totals = [row['total'] for row in results]
 
-#     # Show category selection buttons
-#     keyboard = [[InlineKeyboardButton(cat, callback_data=f"delete_{cat}")] for cat in predefined_categories]
-#     reply_markup = InlineKeyboardMarkup(keyboard)
-#     await update.message.reply_text("Select a category to delete:", reply_markup=reply_markup)
+    # Create the pie chart
+    plt.figure(figsize=(6, 6))
+    plt.pie(totals, labels=categories, autopct='%1.1f%%', startangle=140)
+    plt.title('Expenses by Category')
 
-# async def handle_delete_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
-#     """Handle the deletion of a selected category."""
-#     query = update.callback_query
-#     await query.answer()
+    # Save the chart to a BytesIO object
+    chart_stream = BytesIO()
+    plt.savefig(chart_stream, format='png')
+    plt.close()
+    chart_stream.seek(0)
 
-#     predefined_categories = ["Travel", "Food", "Clothes", "Entertainment", "Health"]
-#     category_to_delete = query.data.replace("delete_", "")
+    return chart_stream
 
-#     if category_to_delete in predefined_categories:
-#         predefined_categories.remove(category_to_delete)
-#         await query.edit_message_text(f"✅ Category '{category_to_delete}' deleted successfully.")
-#     else:
-#         await query.edit_message_text(f"❌ Category '{category_to_delete}' does not exist.")
+async def chart(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
 
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                # Fetch user ID
+                cur.execute("SELECT id FROM users WHERE telegram_id = %s;", (user.id,))
+                user_id = cur.fetchone()["id"]
 
-# async def show_categories(update: Update, context: ContextTypes.DEFAULT_TYPE):
-#     """Show all existing categories."""
-#     if CATEGORIES:
-#         categories_list = "\n".join(f"- {category}" for category in CATEGORIES)
-#         await update.message.reply_text(f"📂 Existing Categories:\n{categories_list}")
-#     else:
-#         await update.message.reply_text("⚠️ No categories available.")
+        # Generate the pie chart
+        chart_stream = await generate_expense_pie_chart(user_id)
+
+        if chart_stream is None:
+            await update.message.reply_text("No expenses to show yet.")
+        else:
+            await update.message.reply_photo(photo=chart_stream, caption="Here is your expense chart.")
+    except Exception as e:
+        await update.message.reply_text(f"❌ An error occurred: {e}")
