@@ -12,12 +12,13 @@ EXPENSES_FILE = "expenses.csv"
 def get_db_connection():
     """Establish a connection to the PostgreSQL database."""
     return psycopg2.connect(
-        dbname=os.getenv("DB_NAME"),
-        user=os.getenv("DB_USER"),
-        password=os.getenv("DB_PASSWORD"),
-        host=os.getenv("DB_HOST"),
+        dbname=os.getenv("PGDATABASE"),
+        user=os.getenv("PGUSER"),
+        password=os.getenv("PGPASSWORD"),
+        host=os.getenv("PGHOST"),
         port=os.getenv("DB_PORT"),
-        cursor_factory=RealDictCursor
+        cursor_factory=RealDictCursor,
+        sslmode='require' 
     )
 
 
