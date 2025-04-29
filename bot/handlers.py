@@ -1,32 +1,20 @@
 from datetime import datetime, timedelta
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes
-from utils import load_expenses, save_expense, start_message, get_db_connection
+from utils import start_message, get_db_connection, help_message
 import csv
 import os
 import matplotlib.pyplot as plt
 from io import BytesIO
 
-expenses = load_expenses()
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(start_message())
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Provide a list of available commands and their descriptions."""
-    help_text = (
-        "Here are the available commands:\n\n"
-        "/start - Start the bot and get a welcome message.\n"
-        "/add <amount> - Add a new expense. Example: /add 50\n"
-        "/summary - Get a summary of all expenses.\n"
-        "/daily - Get today's expenses.\n"
-        "/weekly - Get this week's expenses.\n"
-        "/monthly - Get this month's expenses.\n"
-        "/export - Export all expenses as a CSV file.\n"
-        "/help - Show this help message.\n"
-        "/chart - Show expenses in pie chart.\n"
-    )
-    await update.message.reply_text(help_text)
+
+    await update.message.reply_text(help_message())
 
 async def add_expense(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
