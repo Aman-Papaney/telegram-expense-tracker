@@ -52,34 +52,17 @@ def save_expense(expenses, amount, category, date):
 
 
 def start_message():
-    msg = """👋 Welcome to Expense Tracker Bot!
-Your personal finance buddy, right inside Telegram.
+    msg = """🎉 Hey there, spender! Welcome to Expense Tracker Bot!
 
-Track your expenses with categories and dates – effortlessly.
-🛠️ What You Can Do:
+Ready to take control of your wallet without breaking a sweat?
+I’m your budgeting buddy — here to track your expenses, show you where your money’s going, and throw in some charts for good measure. 📊
 
-➕ Add an expense:
-/add 50 groceries – Adds a $50 expense under "groceries" with today’s date
+Just say something like add 50 and boom 💥 — logged!
+Want summaries? I’ve got ‘em. Charts? You bet. CSV exports? Fancy!
 
-📊 Get summaries:
+Need a quick tour? Just type /help and I’ll show you the ropes.
 
-    /summary – Total + category breakdown
-
-    /daily, /weekly, /monthly – See your spending by time period
-
-📂 View by category:
-/category groceries – See all expenses in the "groceries" category
-
-📤 Export your data:
-/export – Get a downloadable CSV of all expenses with date & category
-
-🆘 Need help?
-/help – List of all available commands
-
-➕ Manage categories:
-    /addcategory <name> – Add a new category
-    /deletecategory <name> – Delete an existing category
-    /categories – Show all existing categories"""
+Let’s make money tracking actually fun. 💸😎"""
 
 
     return msg
